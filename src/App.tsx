@@ -337,7 +337,7 @@ export default function App() {
     )
   }
 
-  const handleExportPdf = () => {
+  const handleExportPdf = async () => {
     const metaComplete =
       meta.brand.trim() && meta.location.trim() && meta.manager.trim() && meta.inspector.trim() && meta.date
     if (!metaComplete) {
@@ -353,9 +353,13 @@ export default function App() {
       if (!ok) return
     }
 
-    exportInspectionPdf(meta, buildPdfRows(), stats)
-    setExportFeedback('exported')
-    setTimeout(() => setExportFeedback('idle'), 2500)
+    try {
+      await exportInspectionPdf(meta, buildPdfRows(), stats)
+      setExportFeedback('exported')
+      setTimeout(() => setExportFeedback('idle'), 2500)
+    } catch {
+      window.alert('PDF export failed. Try again.')
+    }
   }
 
   const renderHome = () => (

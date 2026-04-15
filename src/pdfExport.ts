@@ -25,6 +25,24 @@ function safeFileSegment(s: string) {
   return s.replace(/[/\\?%*:|"<>]/g, '-').replace(/\s+/g, '-').trim() || 'report'
 }
 
+/** Load `public/app-logo.jpeg` (respects Vite `base` for GitHub Pages). */
+async function fetchLogoAsDataUrl(): Promise<string | null> {
+  const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`
+  try {
+    const res = await fetch(`${base}app-logo.jpeg`)
+    if (!res.ok) return null
+    const blob = await res.blob()
+    return await new Promise((resolve, reject) => {
+      const r = new FileReader()
+      r.onloadend = () => resolve(r.result as string)
+      r.onerror = () => reject(new Error('read failed'))
+      r.readAsDataURL(blob)
+    })
+  } catch {
+    return null
+  }
+}
+
 function formatFromDataUrl(dataUrl: string): 'JPEG' | 'PNG' | 'WEBP' {
   if (dataUrl.startsWith('data:image/png')) return 'PNG'
   if (dataUrl.startsWith('data:image/webp')) return 'WEBP'
@@ -107,13 +125,39 @@ function appendPhotoEvidence(
 }
 
 /** Builds a downloadable inspection report PDF in the browser (no server). */
-export function exportInspectionPdf(meta: PdfMeta, rows: PdfRow[], stats: { yes: number; no: number; unanswered: number }) {
+export async function exportInspectionPdf(
+  meta: PdfMeta,
+  rows: PdfRow[],
+  stats: { yes: number; no: number; unanswered: number },
+) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+  const pageWidth = doc.internal.pageSize.getWidth()
   const margin = 14
-  let y = 18
+  let y = margin
+
+  const logoData = await fetchLogoAsDataUrl()
+  if (logoData) {
+    try {
+      const maxLogoW = 40
+      const props = doc.getImageProperties(logoData)
+      const logoW = maxLogoW
+      const logoH = (props.height * logoW) / props.width
+      const x = (pageWidth - logoW) / 2
+      doc.addImage(logoData, formatFromDataUrl(logoData), x, y, logoW, logoH)
+      y += logoH + 6
+    } catch {
+      y = margin + 4
+    }
+  } else {
+    y = margin + 4
+  }
 
   doc.setFontSize(18)
-  doc.text('Store Inspection Report', margin, y)
+  doc.setFont('helvetica', 'bold')
+  const title = 'Store Inspection Report'
+  const titleW = doc.getTextWidth(title)
+  doc.text(title, (pageWidth - titleW) / 2, y)
+  doc.setFont('helvetica', 'normal')
   y += 10
 
   doc.setFontSize(10)
