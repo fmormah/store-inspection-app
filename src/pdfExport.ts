@@ -15,11 +15,95 @@ export type PdfRow = {
   answer: string
   comments: string
   action: string
+  /** Shown in the summary table */
   photo: string
+  /** Base64 data URL from the app (embedded in appendix when present) */
+  photoDataUrl?: string | null
 }
 
 function safeFileSegment(s: string) {
   return s.replace(/[/\\?%*:|"<>]/g, '-').replace(/\s+/g, '-').trim() || 'report'
+}
+
+function formatFromDataUrl(dataUrl: string): 'JPEG' | 'PNG' | 'WEBP' {
+  if (dataUrl.startsWith('data:image/png')) return 'PNG'
+  if (dataUrl.startsWith('data:image/webp')) return 'WEBP'
+  return 'JPEG'
+}
+
+/** Append images after the checklist table, with labels and page breaks as needed. */
+function appendPhotoEvidence(
+  doc: jsPDF,
+  margin: number,
+  items: { category: string; question: string; dataUrl: string }[],
+) {
+  if (items.length === 0) return
+
+  const pageHeight = doc.internal.pageSize.getHeight()
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const maxW = pageWidth - 2 * margin
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const last = (doc as any).lastAutoTable
+  let y = last ? last.finalY + 14 : margin
+
+  if (y > pageHeight - 50) {
+    doc.addPage()
+    y = margin
+  }
+
+  doc.setFontSize(12)
+  doc.setFont('helvetica', 'bold')
+  doc.text('Photo evidence', margin, y)
+  y += 8
+  doc.setFont('helvetica', 'normal')
+
+  let index = 1
+  for (const item of items) {
+    const title = `${index}. [${item.category}] ${item.question}`
+    const titleLines = doc.splitTextToSize(title, maxW)
+    const titleH = titleLines.length * 4.2
+
+    let displayH = 0
+    let displayW = maxW
+    try {
+      const props = doc.getImageProperties(item.dataUrl)
+      displayW = maxW
+      displayH = (props.height * displayW) / props.width
+      const maxH = 110
+      if (displayH > maxH) {
+        displayH = maxH
+        displayW = (props.width * displayH) / props.height
+      }
+    } catch {
+      displayH = 8
+    }
+
+    const blockH = titleH + displayH + 12
+    if (y + blockH > pageHeight - margin) {
+      doc.addPage()
+      y = margin
+    }
+
+    doc.setFontSize(8.5)
+    doc.setTextColor(30, 41, 59)
+    doc.text(titleLines, margin, y)
+    y += titleH + 2
+
+    try {
+      const fmt = formatFromDataUrl(item.dataUrl)
+      doc.addImage(item.dataUrl, fmt, margin, y, displayW, displayH)
+      y += displayH + 10
+    } catch {
+      doc.setFontSize(9)
+      doc.setTextColor(180, 0, 0)
+      doc.text('(This image could not be embedded in the PDF.)', margin, y + 4)
+      doc.setTextColor(0, 0, 0)
+      y += 12
+    }
+
+    index += 1
+  }
 }
 
 /** Builds a downloadable inspection report PDF in the browser (no server). */
@@ -48,6 +132,15 @@ export function exportInspectionPdf(meta: PdfMeta, rows: PdfRow[], stats: { yes:
   doc.text(`Summary — Yes: ${stats.yes}   No: ${stats.no}   Unanswered: ${stats.unanswered}`, margin, y)
   y += 6
 
+  const hasPhotos = rows.some((r) => r.photoDataUrl)
+  if (hasPhotos) {
+    doc.setFontSize(8)
+    doc.setTextColor(66, 66, 66)
+    doc.text('* Full-size images for rows marked Yes* are in the “Photo evidence” section after the table.', margin, y)
+    y += 6
+    doc.setTextColor(0, 0, 0)
+  }
+
   autoTable(doc, {
     startY: y,
     head: [['Category', 'Question', 'Answer', 'Comments', 'Action', 'Photo']],
@@ -64,6 +157,16 @@ export function exportInspectionPdf(meta: PdfMeta, rows: PdfRow[], stats: { yes:
     },
     margin: { left: margin, right: margin },
   })
+
+  const photoItems = rows
+    .filter((r) => r.photoDataUrl && r.photoDataUrl.startsWith('data:image'))
+    .map((r) => ({
+      category: r.category,
+      question: r.question,
+      dataUrl: r.photoDataUrl as string,
+    }))
+
+  appendPhotoEvidence(doc, margin, photoItems)
 
   const base = [meta.brand, meta.location, meta.date].filter(Boolean).map(safeFileSegment).join('-') || 'store-inspection'
   doc.save(`${base}.pdf`)

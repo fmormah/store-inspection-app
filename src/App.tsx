@@ -323,13 +323,15 @@ export default function App() {
     return INSPECTION_CATEGORIES.flatMap((cat) =>
       cat.questions.map((q) => {
         const r = responses[q.id]
+        const hasPhoto = Boolean(r?.photoUrl && String(r.photoUrl).startsWith('data:image'))
         return {
           category: cat.title,
           question: q.text,
           answer: r?.answer ? r.answer.toUpperCase() : '',
           comments: r?.comments ?? '',
           action: r?.action ?? '',
-          photo: r?.photoUrl ? 'Yes' : '',
+          photo: hasPhoto ? 'Yes*' : '',
+          photoDataUrl: hasPhoto ? (r?.photoUrl as string) : null,
         }
       }),
     )
